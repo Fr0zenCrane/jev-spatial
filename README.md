@@ -1,9 +1,3 @@
----
-license: apache-2.0
-base_model: allenai/Molmo2-ER
-language: [en, zh]
-tags: [spatial-reasoning, multimodal, classification, pointing]
----
 # Jev-Spatial
 
 [Code / 代码](https://github.com/Fr0zenCrane/jev-spatial) · [Weights / 权重](https://huggingface.co/Fr0zencr4nE/jev-spatial)

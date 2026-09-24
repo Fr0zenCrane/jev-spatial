@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Local model/data/cache files
+.cache/
+.hf_cache/
+.asset-download.lock
+models/
+checkpoints/
+data/raw/
+data/processed/
+data/benchmarks/
+data/images/
+data/videos/
+artifacts/
+outputs/
+releases/
+dist/
+build/
+*.egg-info/
+wandb/
+*.safetensors
+*.bin
+*.gguf
+*.pt
+*.pth
+*.ckpt
+*.parquet
+*.zip
+*.tar
+*.tar.gz
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

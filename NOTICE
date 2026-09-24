@@ -1,0 +1,21 @@
+Jev-Spatial — Apache License, Version 2.0
+
+Based on Molmo2-ER and Molmo2 by the Allen Institute for AI and contributors.
+Model: https://huggingface.co/allenai/Molmo2-ER
+Source: https://github.com/allenai/molmo2
+Pinned revision: dab22564403d2607855bb1fffb0721285b445081
+Upstream license: Apache License, Version 2.0 (retained in LICENSE).
+
+The five native Python modules under spatial_jev/molmo2 are unmodified copies
+of the model/processor implementation at the pinned revision. Jev-Spatial adds
+a shared classification head, hierarchical inference, training and evaluation
+code. The released weights merge the trained LoRA into Molmo2-ER and omit the
+unused autoregressive vocabulary head. Configuration metadata is adapted to
+load the implementation from the installed source package.
+
+Jev / System One by TypeSafe is the project's conceptual inspiration.
+This is an independent project, not an official TypeSafe implementation or
+a reproduction of proprietary RLCD. Full acknowledgements are in README.md.
+
+Training and benchmark media are not included. Their original attribution
+and terms remain with their respective authors and distributors.

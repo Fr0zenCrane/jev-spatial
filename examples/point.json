@@ -1,0 +1,14 @@
+{
+  "media": [
+    {
+      "kind": "image",
+      "uri": "scene.png"
+    }
+  ],
+  "question": "Point to the blue circle.",
+  "answer_space": {
+    "kind": "point",
+    "coordinate_system": "normalized_xy",
+    "num_points": 1
+  }
+}

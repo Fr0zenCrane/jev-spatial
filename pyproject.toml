@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spatial-jev"
+version = "0.1.0"
+description = "Jev-Spatial: classification, metric estimation and pointing with one shared classifier"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+inference = [
+  "torch>=2.9,<2.10",
+  "torchvision>=0.24,<0.25",
+  "transformers==4.57.1",
+  "einops>=0.8",
+  "requests>=2.31",
+  "numpy>=1.26,<3",
+  "Pillow>=10",
+  "safetensors>=0.4.5",
+  "huggingface-hub>=0.36,<1",
+]
+export = ["peft==0.18.0"]
+train = [
+  "torch>=2.9,<2.10",
+  "torchvision>=0.24,<0.25",
+  "transformers==4.57.1",
+  "einops>=0.8",
+  "peft>=0.18,<0.19",
+  "pyarrow>=14",
+  "Pillow>=10",
+  "ijson>=3",
+  "safetensors>=0.4",
+  "huggingface-hub>=0.36,<1",
+]
+
+[project.scripts]
+jev-spatial = "spatial_jev.inference:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

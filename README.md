@@ -1,115 +1,334 @@
+<div align="center">
+
 # Jev-Spatial
 
-[Code / 代码](https://github.com/Fr0zenCrane/jev-spatial) · [Weights / 权重](https://huggingface.co/Fr0zencr4nE/jev-spatial)
+**Fast spatial intelligence through finite-choice decisions**
 
-**Molmo2-ER 提供空间理解能力，Jev 启发从有限选项中快速判断。** Jev-Spatial 在 [Molmo2-ER](https://huggingface.co/allenai/Molmo2-ER) 上使用同一个分类头，处理分类、数值估计和 pointing（选点），直接返回选项、数值或坐标。
+[![Code](https://img.shields.io/badge/GitHub-jev--spatial-black?logo=github)](https://github.com/Fr0zenCrane/jev-spatial)
+[![Weights](https://img.shields.io/badge/🤗%20Weights-Fr0zencr4nE%2Fjev--spatial-yellow)](https://huggingface.co/Fr0zencr4nE/jev-spatial)
+[![Base](https://img.shields.io/badge/Base-Molmo2--ER-blue)](https://huggingface.co/allenai/Molmo2-ER)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
 
-**Molmo2-ER provides spatial understanding; Jev inspires fast choices among given options.** Jev-Spatial uses one shared classification head for categorical questions, numerical estimates and pointing, returning option IDs, values or coordinates.
+English · [简体中文](README-zh.md)
 
-## Motivation / 动机
+</div>
 
-许多常见空间理解任务更接近 System 1（快思考）：捕捉视觉模式，利用已有的多模态对齐理解语义，然后作出判断。这些任务主要依赖感知，而非大量推理。受 [Jev / System One](https://typesafe.ai/blog/introducing-system-one-models-and-jev) 启发，我们希望直接读出判断结果，减少把视觉模式逐 token 描述成自然语言的开销。
+**Jev-Spatial** is a *System One* spatial-intelligence model built on [Molmo2-ER](https://huggingface.co/allenai/Molmo2-ER). Inspired by [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev), it gives spatial tasks one shared format: **images + question + candidate options → one decision**. All tasks go through one unified head, and the model never generates text.
 
-Many everyday spatial understanding tasks resemble System 1 perception: recognize a visual pattern, connect it to language, and decide. Inspired by Jev, we expose these decisions directly instead of generating a verbal description of each pattern.
+Every task becomes a choice among a fixed set of options. The tasks fall into three families:
 
-## Method / 方法
+- **Classification** (spatial relations, directions, yes/no): a single choice among the given options.
+- **Numeric regression** (lengths in meters): two rounds. First pick a value range, then a sub-range inside it.
+- **Pointing**, a special case: three rounds of picking one cell in a 3×3 grid. After each of the first two rounds, the model zooms into the chosen cell.
 
-把现成的空间理解 VLM（视觉语言模型）改成 Jev 式快速决策模型，关键是统一不同任务的输入输出：输入图像、问题和对应的候选项，让模型通过分类作出选择。数值和位置通过多轮选择逐步细化。三类任务的约定如下：
+Every output comes from a fixed set of options, so there is nothing to parse and no malformed output. Compared with the autoregressive (AR) baseline, i.e. our reproduction of native Molmo2-ER, Jev-Spatial:
 
-To turn an existing vision-language model (VLM) into a Jev-like decision model, we give each task the same interface: images, a question and candidate options. The model selects an option; repeated selections refine numerical estimates and point locations.
+- **performs about as well overall.** It is within a few points on classification and has lower error on metric estimation.
+- **does better at pointing, which we didn't expect.** Picking grid cells coarse-to-fine works better than generating coordinates as text.
+- when one image gets 8 questions, finishes them **~4.2× faster** than answering one question at a time with AR generation;
+- runs at about the same speed as an AR baseline that also shares the image across questions, while **hitting the pointing target ~2.7× more often**.
 
-`image(s) + question + candidates → Molmo2-ER → shared classifier → option / value / (x, y)`
+> [!NOTE]
+> Jev-Spatial is an independent research project. It follows the Jev idea of answering typed questions with choices instead of generated text. It is **not affiliated with, endorsed by, or derived from TypeSafe AI or its Jev model**, and it was not trained on Jev outputs.
 
-| Task / 任务 | Classification / 分类方式 | Output / 输出 |
-|---|---|---|
-| Relations, directions, yes/no / 空间关系、方向、是否 | Choose an option / 选择候选项 | Option ID / 选项 ID |
-| Height, size / 高度、尺寸 | Choose a range, then refine it / 先选数值区间，再细分 | Value in meters / 米制数值 |
-| Object and free-space pointing / 物体定位、自由空间选点 | Three rounds of 3×3 selection / 三轮九宫格选区（九分法） | Normalized `(x, y)` / 归一化坐标 |
+---
 
-所有任务使用同一个分类头，以交叉熵训练。Pointing 每轮把当前区域分成九宫格并选择一格，连续三轮，输出最后一格的中心坐标；坐标用 0–1 表示在原图中的相对位置。前两轮选定后，会从原图裁出选区、重新编码，帮助下一轮判断，这就是 **crop refill**。评测看最终点是否命中目标物体或有效放置区域。
+## Highlights
 
-All tasks share one classification head and a cross-entropy objective. Pointing selects a cell in a 3×3 grid for three rounds, then returns the final cell's center as coordinates from 0 to 1 in the original image. After each of the first two rounds, the selected region is cropped from the original image and re-encoded for the next decision (**crop refill**). Evaluation checks whether the point hits the target object or a valid placement region.
+- 🧭 **One interface for three task families.** Classification, numeric regression and pointing all use the same request format and the same classifier. Only the options and the number of rounds differ.
+- 🤝 **As good as the base model overall.** Jev-Spatial only picks from a fixed set of options, yet it stays close to native AR everywhere. It is within 1–4 points on classification (CV-Bench −1.0, SAT −4.0) and has lower metric error on VST (0.472 vs. 0.520 m).
+- 🎯 **A bonus on pointing.** Pointing is the one area where it actually does better than the base model: +2.0 on RefSpatial-Bench and +7.0 on Where2Place. Three rounds of 3×3 choices with fresh crops between rounds seem easier to learn than writing out coordinates as text.
+- ⚡ **Fast when one image gets many questions.** The image is encoded once and its cache is shared, all questions run in parallel, and pointing crops from the same round are batched together. With 8 questions per image this is 2.1–3.6× faster than answering the questions one at a time.
+- 🧱 **Output is always valid.** Every answer is one of the supplied options or is decoded from a sequence of choices, so parse failures and runaway outputs can't happen.
+- 🔍 **Inspectable decisions.** Each prediction includes the full choice path and the classifier scores at every round.
 
-**Molmo2-ER 的图像处理 / Image processing：** Molmo2-ER 会把输入图像切成局部图块，并保留一张全图缩略图，兼顾细节和整体布局。**24-crop** 指最多 24 个局部图块，再加全图缩略图；实际数量取决于图像尺寸和比例。Pointing 裁出的选区图也走这套处理，因此会叠加计算开销。
+## Motivation
 
-Molmo2-ER combines local image tiles with a global thumbnail to capture both detail and layout. **24-crop** means up to 24 local tiles plus the thumbnail; the actual count depends on image dimensions and aspect ratio. Pointing crops go through the same preprocessing, adding to the computation.
+Many everyday spatial questions are closer to **System 1** perception than to deliberate reasoning:
 
-**Training / 训练：** **72,061 QA** — SAT 24,988 + VST-P 22,073 + RefSpatial 25,000. 使用 8×A800，以 LoRA 微调语言部分并训练分类头，冻结视觉编码器和图文连接层（projector）。 / Fine-tune the language model with LoRA and train the classifier on 8×A800; freeze the vision encoder and the projector that connects visual features to the language model.
+- Is the mug to the left of the laptop?
+- How tall is that chair?
+- Where can I place the cup?
 
-## Use / 使用
+A VLM already has the visual features and the image-text alignment needed to answer them. Making it describe its perception token by token, then parsing that text back into an answer, adds latency and new ways to fail.
 
-代码从 GitHub 安装，合并权重从 HF 下载。代码仓库目前仍为私有，取得访问权限后可按下列步骤使用： / Install the code from GitHub and download the merged weights from HF. The code repository is currently private; the steps below require access:
+Jev showed that many decisions can be read directly as a choice among typed options. Jev-Spatial applies the same idea to spatial perception. We hypothesize that restricting the output to a finite set of states also makes learning easier, because the model only has to rank a few options instead of producing a precise string. This may explain part of the pointing gains.
+
+## Method
+
+```mermaid
+flowchart LR
+    A["image(s) + question<br/>+ candidate options"] --> B["Molmo2-ER backbone<br/>(LoRA-merged)"]
+    B --> C["unified head<br/>LayerNorm → Linear<br/>(invalid options masked)"]
+    C --> D{task}
+    D -->|classification| E["option ID"]
+    D -->|numeric regression| F["range → sub-range → meters"]
+    D -->|pointing| G["3×3 → 3×3 → 3×3 → (x, y)"]
+    F -. next round .-> B
+    G -. crop refill .-> B
+```
+
+### How Jev-Spatial handles each task
+
+All three task families end the same way: the unified head picks one option from a fixed set. They differ in what the options are, how many rounds it takes, and whether the image changes between rounds.
+
+| Task family | `answer_space.kind` | Jev analogue | Options per round | Rounds | Image changes between rounds? | Output |
+|---|---|---|---|---:|---|---|
+| Classification | `choice` | Yes/no · Choice | The 2–N options in the request | 1 | — | Option ID |
+| Numeric regression | `scalar` | Score (ordered levels) | Value ranges, then sub-ranges | 2 | No | Length in meters |
+| Pointing | `point` | *(new)* | 9 cells of a 3×3 grid | 3 | **Yes (crop refill)** | Normalized `(x, y)` in $[0, 1]$ |
+
+**Classification: one decision.** This covers spatial relations, directions and yes/no questions. The request supplies the candidate options. They are shuffled so the model can't learn to prefer a position, and the model picks one in a single pass. This is Jev's native setting and needs no adaptation.
+
+**Numeric regression: pick a range, then narrow it down.** A continuous value is split into ordered ranges. Round 1 picks a coarse range, with separate classes for *exactly zero* and *above the maximum*. Round 2 picks a sub-range inside it, and the prediction is decoded from that sub-range. The image and question stay the same across both rounds; only the options change. Accuracy therefore depends on how the ranges are designed (see [Limitations](#limitations)).
+
+**Pointing: a special case.** Pointing differs from the other two in two ways: its answer is a *location in the image*, and it is the only task where *the visual input changes between rounds*.
+
+- Each round splits the current region into a 3×3 grid and picks one cell.
+- After each of the first two rounds, the chosen cell is cropped from the original image, encoded again, and appended to the context, so the next round sees a zoomed-in view (*crop refill*).
+- After three rounds the effective grid is 27×27. The final point is the center of the last cell, so each axis is resolved to $1/27 \approx 3.7\%$ of the image.
+
+This zooming is what makes pointing work (see the ablation below). It is also where most of the extra compute goes.
+
+### Key design choices
+
+- **One head, one loss.** All tasks share one classifier trained with cross-entropy. The head outputs scores for up to `max_choices` options, and scores for options that don't exist in a request are masked out.
+- **Answering many questions about one image.** The image is encoded once and its cached context is shared. Independent questions run in parallel from that cache, and crops that different pointing questions need in the same round are processed together in one batch.
+- **Reused computation and no look-ahead.** Later rounds reuse the cached context from earlier rounds and only process new tokens. Image tokens can attend to each other only within the same round, which stops the model from seeing future crops.
+- **Shuffled options.** For classification, the option order is shuffled with a fixed seed. Use `--preserve-option-order` to turn this off.
+
+### Ablation: how the image is used across pointing rounds
+
+We compared three ways to use the image across the three pointing rounds:
+
+- **`single_image`:** reuse the original image in every round, add a description of the region selected so far, and reuse its cache.
+- **`roi_mask`:** reuse the original image's cache, but block the new tokens from attending directly to image tokens outside the selected region.
+- **`crop_refill`:** crop the selected region, encode it again, and append it to the existing context.
+
+These are early checkpoints, not the released one. Each was trained for 300 steps and evaluated with 2-crop images and three 3×3 rounds. RefSpatial scores are region-hit rates on 200 questions.
+
+| Variant | SAT real ↑ | VST MAE (m) ↓ | RefSpatial ↑ | Location ↑ | Placement ↑ |
+|---|---:|---:|---:|---:|---:|
+| `single_image` | **78.7** | 0.599 | 16.0 | 16.0 | 16.0 |
+| `roi_mask` | 77.7 | 0.603 | 18.5 | 21.0 | 16.0 |
+| **`crop_refill`** | 77.7 | **0.599** | **35.0** | **43.0** | **27.0** |
+
+**Summary:** the choice of method barely affects classification or numeric regression. For pointing, `crop_refill` improves the region-hit rate by **+19.0 points** over `single_image`, while `roi_mask` improves it by only +2.5. The released model therefore uses `crop_refill`. All three variants are in `runtime.py` (`point_variant`).
+<sub>Record: `artifacts/benchmarks/fast-v1-20260923T201259Z/comparison.json`</sub>
+
+<details>
+<summary><b>Image processing: what "24-crop" means</b></summary>
+
+Molmo2-ER splits each image into local tiles and adds one global thumbnail, so it sees both fine detail and the overall layout. **24-crop** means *up to* 24 local tiles plus the thumbnail. The actual number depends on image size and aspect ratio. Pointing crops go through the same preprocessing, so each extra round adds compute.
+
+</details>
+
+### Training
+
+| | |
+|---|---|
+| Data | **~72K QA pairs**: SAT ~25K · VST-P ~22K · RefSpatial ~25K |
+| Trainable parameters | LoRA on the language model + the unified head |
+| Frozen | Vision encoder and the projector that connects it to the language model |
+| Hardware | 8 × A800 |
+| Release | LoRA merged into the backbone (no PEFT needed at inference) |
+
+## Results
+
+### Accuracy
+
+All image benchmarks use 24-crop and were run locally. Scores are percentages (↑ is better). VST reports mean absolute error in meters on 300 internal dev samples (↓ is better).
+
+| Benchmark | Molmo2-ER (reproduced) | Naive three-head | **Jev-Spatial** | Δ vs. Molmo2-ER (reproduced) |
+|---|---:|---:|---:|---:|
+| SAT real ↑ | **79.3** | 77.7 | 75.3 | −4.0 |
+| CV-Bench ↑ | **87.3** | 87.0 | 86.3 | −1.0 |
+| RefSpatial-Bench ↑ | 52.5 | 9.0 | **54.5** | +2.0 |
+| Where2Place ↑ | 57.0 | 26.0 | **64.0** | +7.0 |
+| RoboSpatial-Pointing † ↑ | 29.5 | 4.1 | **59.8** | +30.3 |
+| RoboSpatial-VQA † ↑ | 58.0 | 58.3 | **64.2** | +6.2 |
+| VST dev MAE (m) ↓ | 0.520 | **0.428** | 0.472 | −9% error |
+
+- **Naive three-head** is the first prototype. It had separate heads for classification, number regression and coordinate regression, and used less data and fewer training steps. It regresses metric values best but nearly fails at pointing.
+- **The unified head** greatly improves pointing, loses a little on classification, and still trails the three-head baseline on numeric regression. See [Limitations](#limitations).
+
+> [!WARNING]
+> † **The RoboSpatial numbers are not yet verified.** Our native AR VQA score (58.0) is well below the published Molmo2-ER result (73.4). Treat these rows as provisional until the evaluation is fixed.
+
+### Latency: many questions about one image
+
+Jev-Spatial is fastest when one image gets many independent questions, which is common for robots and agents. We encode the image once and share its cached context, run all questions in parallel, and batch together the pointing crops needed in the same round. Pointing always uses the full three 3×3 rounds.
+
+**Setup:** 20 images and 160 questions (8 per image) from RoboSpatial, covering spatial relations, whether an object can be placed somewhere, and pointing to free space. Single A800, each configuration repeated 3 times. The table reports the mean time until all 8 questions about one image are answered.
+
+| Method | Inference mode | 2-crop, ms ↓ | 24-crop, ms ↓ | Pointing hit rate, 24-crop ↑ |
+|---|---|---:|---:|---:|
+| Molmo2-ER (reproduced) | one question at a time | 2848.0 | 5572.6 | 20.0% |
+| Molmo2-ER (reproduced) | shared image, parallel | 717.9 | 1123.0 | 21.8% |
+| Naive three-head | shared image, parallel | **148.3** | **527.1** | 7.3% |
+| Jev-Spatial | one question at a time | 1397.6 | 4604.2 | 56.4% |
+| **Jev-Spatial** | shared image, parallel | 675.7 | 1294.0 | **58.2%** |
+
+Speedup from sharing the image, for Jev-Spatial:
+
+| Questions per image | 1 | 2 | 4 | 8 |
+|---|---:|---:|---:|---:|
+| 2-crop | 18.6% slower | 1.18× | 1.58× | **2.07×** |
+| 24-crop | 5.6% slower | 1.53× | 2.31× | **3.56×** |
+
+**Summary**
+
+1. **Much faster than answering one question at a time with AR.** With 8 questions per image, Jev-Spatial is **4.2× (2-crop) / 4.3× (24-crop)** faster than native AR answering them one by one, and hits the pointing target **~2.9× more often** (58.2% vs. 20.0%).
+2. **Sharing the image pays off from 2 questions on.** The gain grows with the number of questions per image, up to 2.07× (2-crop) and 3.56× (24-crop) at 8 questions. With a single question there is nothing to share, so the extra overhead makes it slightly slower.
+3. **Against AR that also shares the image, the advantage is quality, not speed.** When both sides share the image and run questions in parallel, Jev-Spatial is 1.06× faster at 2-crop and **15.2% slower at 24-crop**. The 24-crop slowdown comes from re-encoding the selected crops between rounds (see [Limitations](#limitations)). In return it hits the pointing target **2.7× more often** (58.2% vs. 21.8%).
+4. **Numeric questions** (20 images × 2 questions each): sharing the image cuts Jev-Spatial's time from 378.0 to **295.7 ms** (1.28×). Native AR with the same sharing takes 347.2 ms. The naive three-head baseline is fastest overall, but its pointing hit rate collapses to 7.3%.
+
+<sub>These speedups combine all three optimizations: sharing the image, running questions in parallel, and batching crops. In an early two-image test, crop batching alone saved only ~5.5% (24-crop, 8 questions per image: 1444.1 → 1365.0 ms), which is too small a test to count as a formal ablation. In BF16, parallel and one-by-one runs do not produce bit-identical outputs, so each quality number comes from that mode's own outputs. Record: `artifacts/benchmarks/scene-latency-20260924/comparison.json`</sub>
+
+<details>
+<summary><b>Latency with one question per request, per benchmark</b></summary>
+
+Milliseconds per request, single A800 after warmup. 20 fixed samples per benchmark, each run 3 times; we take the median per sample and average. Timing covers image loading, preprocessing, inference and output parsing. Image tasks use 24-crop; VST uses 2-crop.
+
+| Benchmark | Molmo2-ER (reproduced) | Naive three-head | **Jev-Spatial** |
+|---|---:|---:|---:|
+| SAT real | 504.3 | 461.2 | 484.3 |
+| CV-Bench | 202.8 | 161.8 | 158.2 |
+| RefSpatial-Bench | 741.4 | 127.9 | 306.1 |
+| Where2Place | 1083.2 | 121.8 | 299.9 |
+| RoboSpatial-Pointing | 986.8 | 464.8 | 772.9 |
+| RoboSpatial-VQA | 542.5 | 463.2 | 471.1 |
+| VST numeric dev | 300.1 | 111.8 | 187.4 |
+| **Mean** (benchmarks weighted equally) | 623.0 | 273.2 | 382.9 |
+
+With one question per request, classification speed is close to native AR. The biggest savings are on pointing benchmarks, where AR has to generate coordinate text: up to 3.6× faster on Where2Place. Reproduce with `scripts/benchmark_latency.py`.
+
+</details>
+
+## Quick start
+
+### Install
+
+Requires Python ≥ 3.10 and a CUDA GPU.
 
 ```bash
 git clone https://github.com/Fr0zenCrane/jev-spatial
 cd jev-spatial
 pip install -e '.[inference]'
 hf download Fr0zencr4nE/jev-spatial --local-dir models/jev-spatial
+```
+
+### Command line
+
+```bash
 jev-spatial --model models/jev-spatial --input examples/requests.jsonl
 ```
 
-## Results / 结果
+`--input` takes a single `.json` request or a `.jsonl` file with one request per line. Image paths are resolved relative to the request file.
 
-我们先用三个独立头分别做分类、预测数值和预测坐标，作为 **three-head naive baseline**，随后改为统一分类头。Pointing 比较了始终使用原图、在注意力计算中屏蔽未选区域、裁出选区重新编码三种方案，当前采用第三种（crop refill）。
+| Flag | Description |
+|---|---|
+| `--output PATH` | Write results to a file instead of stdout |
+| `--device` | Default `cuda:0` |
+| `--max-crops N` | Override the Molmo2-ER crop limit (the release defaults to 2; the image benchmarks use 24) |
+| `--max-sequence-length N` | Override the total token budget for all rounds |
+| `--preserve-option-order` | Don't shuffle classification options |
+| `--seed N` | Override the per-sample shuffle seed |
 
-We began with a **naive three-head baseline** for classification, numeric regression and coordinate regression, then unified the tasks under one classifier. Pointing experiments compared reusing the original image, masking attention to unselected regions, and re-encoding the selected crop. The current model uses the third approach (crop refill).
+### Python
 
-| Local evaluation / 本地评测 | Native Molmo2-ER | Naive three-head | Shared head, merged / 统一头 |
-|---|---:|---:|---:|
-| SAT real ↑ | 79.3 | 77.7 | 75.3 |
-| CV-Bench ↑ | 87.3 | 87.0 | 86.3 |
-| RefSpatial-Bench ↑ | 52.5 | 9.0 | 54.5 |
-| Where2Place ↑ | 57.0 | 26.0 | 64.0 |
-| RoboSpatial-Poi † ↑ | 29.5 | 4.1 | 59.8 |
-| RoboSpatial-VQ † ↑ | 58.0 | 58.3 | 64.2 |
-| VST internal dev MAE, m ↓ | 0.520 | **0.428** | 0.472 |
+```python
+from spatial_jev.inference import JevSpatial
 
-图像评测使用 24-crop，表中分数为百分比；VST 在 300 条内部开发样本上报告平均绝对误差（MAE，单位米）。Three-head 使用了更少的数据与训练步数。统一头改善了部分选点结果，但分类有回退，**数值估计仍不如 naive baseline**。
+model = JevSpatial.from_pretrained("models/jev-spatial", device="cuda:0")
 
-Image scores are local 24-crop percentages; VST reports mean absolute error (MAE, in meters) on 300 internal development examples. The three-head baseline used less data and training. The shared head improves some pointing scores, while classification accuracy drops on some tests and **numeric regression still trails the naive baseline**.
+# Classification: spatial relations, directions, yes/no
+model.classify("examples/scene.png",
+               "Where is the red square relative to the blue circle?",
+               ["left", "right"])
 
-† **RoboSpatial 待复核 / unresolved reproduction:** native VQ **58.0** vs paper **73.4**; always-Yes **72.3** on the current labels.
+# Numeric regression: nonnegative length in meters
+model.measure("examples/scene.png", "How tall is the chair?", quantity="height")
 
-**Latency / 延迟（ms/request ↓）**
+# Pointing: one normalized (x, y) point in a single image
+model.point("examples/scene.png", "Point to the blue circle.")
+```
 
-每个 benchmark 固定抽 20 条，在同一张 A800 上预热后逐条测量，每条运行 3 次取中位数。计入读图、预处理、推理和结果解析；LoRA 权重已合并，pointing 每题请求一个点。图像任务使用 24-crop，VST 数值任务使用 2-crop。
+Image paths in the Python API are resolved relative to the current working directory.
 
-After warmup, run 20 fixed samples per benchmark one at a time on the same A800, taking the median of 3 runs per sample. Timing includes image loading, preprocessing, inference and parsing. Both LoRA adapters are merged, and pointing requests one point. Image tasks use 24-crop; VST uses 2-crop.
+### Request format
 
-| Benchmark / 统计 | Native Molmo2-ER | Naive three-head | Shared head / 统一头 |
-|---|---:|---:|---:|
-| SAT real | 504.3 | 461.2 | 484.3 |
-| CV-Bench | 202.8 | 161.8 | 158.2 |
-| RefSpatial-Bench | 741.4 | 127.9 | 306.1 |
-| Where2Place | 1083.2 | 121.8 | 299.9 |
-| RoboSpatial-Poi | 986.8 | 464.8 | 772.9 |
-| RoboSpatial-VQ | 542.5 | 463.2 | 471.1 |
-| VST numeric dev | 300.1 | 111.8 | 187.4 |
-| Overall mean / 总体均值 | 623.0 | 273.2 | 382.9 |
-| Overall P50 | 544.0 | 127.0 | 301.2 |
-| Overall P95 | 1267.2 | 467.0 | 776.0 |
+```jsonc
+// classification: 2..max_choices options, each with a unique, nonempty id and text
+{"media": [{"kind": "image", "uri": "scene.png"}],
+ "question": "Where is the red square relative to the blue circle?",
+ "answer_space": {"kind": "choice",
+                  "options": [{"id": "left", "text": "left"},
+                              {"id": "right", "text": "right"}]}}
 
-统一头总体平均比原生快 **1.63×**，比 three-head 耗时高约 **40%**。 / The shared head averages **1.63×** faster than native, with **40%** higher latency than three-head.
+// numeric regression: this checkpoint estimates nonnegative lengths in meters
+{"media": [{"kind": "image", "uri": "scene.png"}],
+ "question": "How tall is the chair?",
+ "answer_space": {"kind": "scalar", "quantity": "height", "unit": "m"}}
 
-各 benchmark 行为平均值，总体按 benchmark 等权。保留了 1 条原生解析失败，以及 1 条 Where2Place 原生输出达到 256-token 上限（约 9.5 秒）。复现脚本：`scripts/benchmark_latency.py`。 / Rows show means with equal benchmark weighting. All requests are included: one native parse failure and one native Where2Place response reaching the 256-token cap (~9.5 s).
+// pointing: exactly one image and one point
+{"media": [{"kind": "image", "uri": "scene.png"}],
+ "question": "Point to the blue circle.",
+ "answer_space": {"kind": "point", "coordinate_system": "normalized_xy", "num_points": 1}}
+```
 
-## Limitations / 局限
+### Response format
 
-- **算力与数据 / Compute and data：** 短训练和有限数据保留了部分基模能力，鲁棒性仍不足。 / Limited training preserves some base-model capability, with robustness still to improve.
-- **数值设计 / Numeric design：** 当前区间划分依赖小样本，仍偏 toy；需要根据大规模空间数值数据中的常见范围和极值，重新设计通用的两级类别。 / The current bins come from a small sample. A general two-level scheme needs larger spatial regression datasets, representative value ranges and explicit treatment of extreme values.
-- **消融范围 / Ablation scope：** 开发集较小，实验只使用一个随机种子；定位网格较粗，训练主要使用单个标注点，这些都限制了结论和定位精度。 / Small development sets, one random seed, coarse grids and training with one annotated point per example limit the conclusions and pointing precision.
-- **合并差异 / Merge differences：** 合并后部分 pointing 输出会变化，24-crop 配置下更明显。 / Some pointing outputs change after merging, especially at 24 crops.
+| Field | Meaning |
+|---|---|
+| `prediction` | Option ID, a value in meters, or an `(x, y)` point |
+| `path` | Index chosen at each round |
+| `logits` | Classifier scores for every option at each round |
+| `mapping` | How the shuffled options map back to the original ones (classification only) |
+| `input_tokens` | Total input tokens across all rounds |
 
-**TODO / 待办**
+## Repository layout
 
-- [ ] 保留当前设置和至少三轮九分法，检查 24-crop 切块与逐轮选区裁剪的叠加开销及潜在冲突，并评估是否需要更多轮细化。 / Keep the current settings and at least three 3×3 selection rounds. Check the combined cost and possible conflicts between 24-crop preprocessing and per-round cropping, and assess whether more refinement rounds are needed.
+```text
+src/spatial_jev/
+├── inference.py      # JevSpatial API + `jev-spatial` CLI
+├── runtime.py        # multi-round inference, unified head, point variants
+├── hierarchy.py      # scalar ranges and 3×3 grid encoding/decoding
+├── schema.py         # request checks and prompt building
+├── unified.py        # training model for the unified head
+└── molmo2/           # bundled Molmo2 model and processor code (no remote code)
+scripts/              # data prep, training, evaluation, latency, export
+configs/              # pilot_v0 (three-head), unified_v1, mixed_v2
+data/manifests/       # dataset and benchmark source lists
+tests/
+```
 
-## Acknowledgements / 致谢
+## Limitations
 
-首先感谢 **Molmo2-ER 与 Jev**，分别提供本项目的能力基础和核心思路。 / We especially thank **Molmo2-ER and Jev** for the model foundation and decision-oriented inspiration.
+- **Compute and data.** Jev-Spatial was trained for a short time on ~72K QA pairs. It keeps much of the base model's ability, but its robustness hasn't been tested widely.
+- **Numeric regression.** Metric estimation turns a continuous value into two classification rounds over value ranges, so accuracy depends on how the ranges are designed. The current ranges come from a small sample and are close to a toy setup. A general version needs larger metric datasets, representative value ranges, and explicit handling of extreme values. This is the main reason the VST error is still higher than that of the naive three-head baseline, which predicts the number directly.
+- **Image cropping cost.** After each of the first two pointing rounds, the selected region is cropped and run through Molmo2-ER's full image preprocessing again. At 24-crop, each of these crops can itself be split into up to 24 tiles, so the cost grows with every refinement round. This is why Jev-Spatial is 15.2% slower at 24-crop than the AR baseline when both share the image across questions. We haven't yet studied how 24-crop tiling interacts with per-round cropping, or whether the crops need that many tiles at all.
+- **Pointing precision.** Three rounds of 3×3 choices limit precision to 1/27 of each axis, and we haven't tested adding more rounds. Training mostly uses a single annotated point per example.
 
-感谢 / Thanks to [Molmo2](https://github.com/allenai/molmo2), [MolmoAct2](https://github.com/allenai/molmoact2), [Qwen](https://github.com/QwenLM/Qwen3), [SigLIP 2](https://huggingface.co/google/siglip2-so400m-patch14-384); and the community references [jev-visual](https://github.com/hr98w/jev-visual), [Jev-Omni](https://huggingface.co/akhilaaa3/Jev-Omni), [Qwen-2.5-1B-RLCD](https://huggingface.co/harshatheg/Qwen-2.5-1B-RLCD), [OpenJev](https://github.com/razorback16/openjev), [OmniJev](https://github.com/shapsider/OmniJev), [OpenJev-Vision](https://github.com/IamBusy/OpenJev-Vision), [SemIf](https://github.com/TheoLeeCJ/SemIf).
+## Acknowledgements
 
-感谢数据、评测与工具作者 / Thanks to the authors of [SAT](https://huggingface.co/datasets/array/SAT), [VST](https://huggingface.co/datasets/rayruiyang/vst_500k), [RefSpatial/RoboRefer](https://github.com/Zhoues/RoboRefer), [CV-Bench](https://huggingface.co/datasets/nyu-visionx/CV-Bench), [RoboPoint/Where2Place](https://github.com/wentaoyuan/RoboPoint), [RoboSpatial](https://github.com/chanhee-luke/RoboSpatial-Eval), [VSI-Bench](https://github.com/vision-x-nyu/thinking-in-space), the original scene datasets, PyTorch, Transformers, PEFT and Safetensors.
+Special thanks to **[Molmo2-ER](https://huggingface.co/allenai/Molmo2-ER)**, which provides the spatial understanding, and to **[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev)**, which inspired the decision-based approach.
 
-**License / 许可：Apache-2.0.**
+We also thank [Molmo2](https://github.com/allenai/molmo2), [MolmoAct2](https://github.com/allenai/molmoact2), [Qwen](https://github.com/QwenLM/Qwen3), [SigLIP 2](https://huggingface.co/google/siglip2-so400m-patch14-384), and the open Jev-style community projects [jev-visual](https://github.com/hr98w/jev-visual), [Jev-Omni](https://huggingface.co/akhilaaa3/Jev-Omni), [Qwen-2.5-1B-RLCD](https://huggingface.co/harshatheg/Qwen-2.5-1B-RLCD), [OpenJev](https://github.com/razorback16/openjev), [OmniJev](https://github.com/shapsider/OmniJev), [OpenJev-Vision](https://github.com/IamBusy/OpenJev-Vision), and [SemIf](https://github.com/TheoLeeCJ/SemIf).
+
+Data and benchmarks: [SAT](https://huggingface.co/datasets/array/SAT), [VST](https://huggingface.co/datasets/rayruiyang/vst_500k), [RefSpatial / RoboRefer](https://github.com/Zhoues/RoboRefer), [CV-Bench](https://huggingface.co/datasets/nyu-visionx/CV-Bench), [RoboPoint / Where2Place](https://github.com/wentaoyuan/RoboPoint), [RoboSpatial](https://github.com/chanhee-luke/RoboSpatial-Eval), [VSI-Bench](https://github.com/vision-x-nyu/thinking-in-space), and the original scene datasets. Tooling: PyTorch, Transformers, PEFT, Safetensors.
+
+## Citation
+
+```bibtex
+@misc{jevspatial2026,
+  title        = {Jev-Spatial: Fast Spatial Intelligence through Finite-Choice Decisions},
+  author       = {Fr0zenCrane},
+  year         = {2026},
+  howpublished = {\url{https://github.com/Fr0zenCrane/jev-spatial}}
+}
+```
+
+## License
+
+Code and weights: [Apache-2.0](LICENSE). See [NOTICE](NOTICE) for third-party attributions. Datasets keep their own licenses.

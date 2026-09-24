@@ -8,6 +8,9 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+MODEL_CARD_METADATA = ('---\nlicense: apache-2.0\nbase_model: allenai/Molmo2-ER\n'
+                       'language: [en, zh]\n'
+                       'tags: [spatial-reasoning, multimodal, classification, pointing]\n---\n')
 
 
 def digest(path):
@@ -62,8 +65,11 @@ def stage_model(source, output):
             target.write_text(json.dumps(value, indent=2, ensure_ascii=False) + '\n')
         else:
             shutil.copy2(path, target)
-    for name in ['README.md', 'LICENSE', 'NOTICE']:
+    for name in ['README.md', 'README-zh.md', 'LICENSE', 'NOTICE']:
         shutil.copy2(ROOT / name, output / name)
+    readme = output / 'README.md'
+    if not readme.read_text().startswith('---\n'):
+        readme.write_text(MODEL_CARD_METADATA + readme.read_text())
     (output / '.gitattributes').write_text('*.safetensors filter=lfs diff=lfs merge=lfs -text\n')
     removed = {'files', 'standalone_runtime', 'standalone_validation_passed',
                'validation_summary_sha256', 'code_license', 'checkpoint_contributions_license'}

@@ -1,4 +1,4 @@
-"""Stage one shared README, GitHub source and code-free HF weights; never publish."""
+"""Stage English/Chinese READMEs, GitHub source and code-free HF weights; never publish."""
 
 import argparse
 import json
@@ -6,7 +6,7 @@ import re
 import shutil
 from pathlib import Path
 
-from package_release import ROOT, digest, stage_model
+from package_release import MODEL_CARD_METADATA, ROOT, digest, stage_model
 
 SCRIPTS = (
     'download_assets.py', 'download_ranges.py', 'prepare_pilot.py', 'prepare_mixed_v2.py',
@@ -22,7 +22,8 @@ CREDENTIAL = re.compile(r'(?:hf_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|'
 
 
 def source_paths():
-    paths = [ROOT / name for name in ['.gitignore', 'README.md', 'LICENSE', 'NOTICE', 'pyproject.toml']]
+    paths = [ROOT / name for name in
+             ['.gitignore', 'README.md', 'README-zh.md', 'LICENSE', 'NOTICE', 'pyproject.toml']]
     paths.extend(ROOT / 'scripts' / name for name in SCRIPTS)
     for tree, suffixes in [('src', {'.py'}), ('configs', {'.json'}),
                            ('tests', {'.py'}), ('examples', {'.json', '.jsonl', '.png'}),
@@ -55,11 +56,12 @@ def main():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
     manifest = stage_model(args.model, hf)
-    assert (github / 'README.md').read_bytes() == (hf / 'README.md').read_bytes()
+    assert (github / 'README.md').read_text() == (hf / 'README.md').read_text().removeprefix(MODEL_CARD_METADATA)
+    assert (github / 'README-zh.md').read_bytes() == (hf / 'README-zh.md').read_bytes()
     for folder in (github, hf):
-        assert [p.name for p in folder.rglob('*.md')] == ['README.md']
+        assert {p.name for p in folder.rglob('*.md')} == {'README.md', 'README-zh.md'}
     report = {'status': 'local_review_only', 'git_commits_created': 0, 'network_writes': 0,
-              'one_canonical_readme': True, 'license': 'Apache-2.0',
+              'readme_languages': ['en', 'zh'], 'license': 'Apache-2.0',
               'hf_contains_python_code': False, 'weight_files_unchanged': True}
     for name, folder in [('github', github), ('huggingface', hf)]:
         files = [p for p in folder.rglob('*') if p.is_file()]
